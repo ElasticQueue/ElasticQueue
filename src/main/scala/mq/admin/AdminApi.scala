@@ -12,6 +12,7 @@ import spray.http.MediaTypes._
 import scala.collection.immutable.TreeSet
 import scala.concurrent.Await
 import scala.concurrent.duration._
+import scala.concurrent.ExecutionContext.Implicits.global // for futures
 
 import akka.pattern._
 
@@ -63,20 +64,18 @@ trait AdminApi extends HttpServiceActor with SprayJsonSupport {
         } ~ get {
           // http://127.0.0.1:4322/api/queue?appId=app1&topic=test
           parameter('appId, 'topic) { (appId, topic) => {
-            val queue = Await.result(Queues.getQueue(appId, topic), timeout.duration)
+            val queue = Queues.getQueue(appId, topic)
             complete(queue)
           }
           }
         }
       } ~ path("api"  / "queue") {
         complete {
-          val queues = Await.result(Queues.getAllQueues(), timeout.duration)
-          queues
+          Queues.getAllQueues()
         }
       } ~ path("api" / "consumer") {
         complete {
-          val consumers = Await.result(Consumers.getAllConsumers(), timeout.duration)
-          consumers
+          Consumers.getAllConsumers()
         }
       } ~ path("api" / "consumer" / Segment) { consumerId =>
         parameter('status.as[Boolean]) { status =>
