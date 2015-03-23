@@ -2,11 +2,9 @@ import AssemblyKeys._
 
 assemblySettings
 
-jarName in assembly := "hello.jar"
+name := "mq"
 
-name := "hello"
-
-version := "1.0"
+version := "0.1"
 
 scalaVersion := "2.11.5"
 
@@ -41,3 +39,8 @@ libraryDependencies ++= Seq(
 )
 
 net.virtualvoid.sbt.graph.Plugin.graphSettings
+
+//lazy val `wtb-spark` = project.settings(assemblySettings: _*)
+
+//lazy val client = project.dependsOn(common).settings(assemblySettings: _*)
+

@@ -2,6 +2,7 @@ package mq
 
 import akka.actor.{ActorLogging, Actor}
 import mq.ClusterProtocol._
+import scala.concurrent.Await
 import scala.concurrent.duration._
 
 /**
@@ -49,7 +50,8 @@ trait BrokerActor extends Actor with ActorLogging {
     case TickFetch =>
       // Back presure
       if(taskQueue.length < 1000) {
-        val messageSlice = Messages.getMsgs(consumer.appId, consumer.topic, offset, consumer.shardId)
+        val messageSliceF = Messages.getMsgsF(consumer.appId, consumer.topic, offset, consumer.shardId)
+        val messageSlice = Await.result(messageSliceF, 3 second)
         messageSlice.messages.foreach { (m) =>
           taskQueue.enqueue(m)
         }

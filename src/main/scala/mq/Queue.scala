@@ -251,7 +251,7 @@ object Messages extends Messages with MyConnector {
 
     val uuid = UUID.fromString(fromId)
 
-    val ts = (uuid.timestamp() - 0x01b21dd213814000L)/10000 + 3600*24*1000;
+    val ts = (uuid.timestamp() - 0x01b21dd213814000L)/10000 + 3600*24*1000
 
     val date = new LocalDate(ts)
 
@@ -261,6 +261,36 @@ object Messages extends Messages with MyConnector {
 
     select.where(_.appId eqs appId).and(_.topic eqs topic).and(_.shardId eqs shardId).and(_.date eqs date.toDate)
       .and(_.id gt uuid).and(_.id lte uuidNow).limit(100).fetch()
+  }
+
+  def getMsgsF(appId: String, topic: String, offset: String, shardId: Int): ScalaFuture[MessageSlice] = {
+    val fetchMessages = Messages.getRecord(appId, shardId, topic, offset)
+    var _offset = offset
+
+    fetchMessages.map { msgs =>
+      if (msgs.length > 0) {
+        _offset = msgs.last.id.toString
+        ScalaFuture { MessageSlice(offset, msgs, _offset) }
+      } else {
+        val fetchMessagesNextDay = Messages.getRecordNextDay(appId, shardId, topic, offset)
+        fetchMessagesNextDay.map { msgsNd =>
+          if (msgsNd.length > 0) {
+            _offset = msgsNd.last.id.toString
+            MessageSlice(offset, msgsNd, _offset)
+          } else {
+            val uuid = UUID.fromString(offset)
+            val DayOffset = new LocalDate((uuid.timestamp() - 0x01b21dd213814000L) / 10000)
+            if (DayOffset == new LocalDate()) {
+              //    if next day is tomorrow then keep reading today and next day
+            } else {
+              //    if next day is not tomorrow then jump to next day
+              _offset = UUIDs.startOf(UUIDs.unixTimestamp(uuid) + 3600 * 24 * 1000).toString
+            }
+            MessageSlice(offset, msgsNd, _offset)
+          }
+        }
+      }
+    } flatMap(f => f)
   }
 
   def getMsgs(appId: String, topic: String, offset: String, shardId: Int): MessageSlice = {
@@ -307,18 +337,21 @@ object Messages extends Messages with MyConnector {
     MessageSlice(offset, messages, _offset)
   }
 
-  def getHttpMsgs(appId: String, topic: String, offset: String, shardId: Int): HttpMessageSlice = {
-    val messageSlice = getMsgs(appId, topic, offset, shardId)
+  def getHttpMsgs(appId: String, topic: String, offset: String, shardId: Int): ScalaFuture[HttpMessageSlice] = {
+    val messageSliceF = getMsgsF(appId, topic, offset, shardId)
+    messageSliceF.map{ messageSlice =>
 
-    var messages = List[HttpMessage]()
-    var count = 0
+      var messages = List[HttpMessage]()
+      var count = 0
 
-    messageSlice.messages.foreach { (m) =>
-      messages = messages :+ HttpMessage(m.appId, m.topic, m.shardId, m.date.toDate.toString, m.id.toString, m.payload)
-      count = count + 1
+      messageSlice.messages.foreach { (m) =>
+        messages = messages :+ HttpMessage(m.appId, m.topic, m.shardId, m.date.toDate.toString, m.id.toString, m.payload)
+        count = count + 1
+      }
+
+      HttpMessageSlice(messageSlice.start_offset, messages, messageSlice.end_offset, count)
+
     }
-
-    HttpMessageSlice(messageSlice.start_offset, messages, messageSlice.end_offset, count)
   }
 
 }

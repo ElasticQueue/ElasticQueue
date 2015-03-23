@@ -58,8 +58,8 @@ trait Api extends HttpServiceActor with SprayJsonSupport {
         // http://127.0.0.1:4322/api/message?appId=app1&topic=test&offset=59175f21-c1db-11e4-a7a1-73862d9aef3b&shardId=0
         parameters('appId, 'topic, 'offset, 'shardId.as[Int]) { (appId, topic, offset, shardId) => {
 
-          val messageSlice = Messages.getHttpMsgs(appId, topic, offset, shardId)
-          complete(messageSlice)
+          val messageSlicef = Messages.getHttpMsgs(appId, topic, offset, shardId)
+          complete(messageSlicef)
         }
         }
       }
