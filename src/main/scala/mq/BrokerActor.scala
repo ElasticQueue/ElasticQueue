@@ -24,7 +24,6 @@ trait BrokerActor extends Actor with ActorLogging {
 
   var taskQueue = scala.collection.mutable.Queue.empty[Message]
 
-
   var start = System.currentTimeMillis()
 
   system.scheduler.scheduleOnce(1000 millis, self, TickFetch)
@@ -48,7 +47,7 @@ trait BrokerActor extends Actor with ActorLogging {
   def running(consumer: Consumer): Receive = {
 
     case TickFetch =>
-      // Back presure
+      // Back preasure
       if(taskQueue.length < 1000) {
         val messageSliceF = Messages.getMsgsF(consumer.appId, consumer.topic, offset, consumer.shardId)
         val messageSlice = Await.result(messageSliceF, 3 second)
@@ -78,7 +77,7 @@ trait BrokerActor extends Actor with ActorLogging {
 
     case Tick =>
 
-      if(!taskQueue.isEmpty) {
+      if(taskQueue.nonEmpty) {
         count = count + 1
         process(taskQueue.dequeue())
       }
@@ -87,41 +86,3 @@ trait BrokerActor extends Actor with ActorLogging {
     case _ =>
 
   }
-
-//  def receive: Receive = {
-//
-//    case consumer: Consumer =>
-//      consumerId = consumer.consumerId
-//      appId = consumer.appId
-//      shardId = consumer.shardId
-//      topic = consumer.topic
-//      offset = consumer.offset
-//      config = consumer.config
-//      start(consumer)
-//
-//
-//    case Tick =>
-//      val messageSlice = Messages.getMsgs(appId, topic, offset, shardId)
-//      messageSlice.messages.foreach { (m) =>
-//        process(m)
-//        count = count + 1
-//      }
-//
-//      val micros = (System.nanoTime - start) / 1000
-//      val tps = count / (micros / 1000000)
-//
-//      log.debug("tps: {}", tps)
-//
-//      offset = messageSlice.end_offset
-//
-//      Consumers.updateOffset(consumerId, shardId, offset)
-//
-//      if (messageSlice.messages.length > 0) {
-//        system.scheduler.scheduleOnce(0 millis, self, Tick)
-//      } else {
-//        system.scheduler.scheduleOnce(1000 millis, self, Tick)
-//      }
-//
-//    case _ =>
-//  }
-}
