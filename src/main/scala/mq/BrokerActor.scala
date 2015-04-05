@@ -12,12 +12,12 @@ trait BrokerActor extends Actor with ActorLogging {
 
   import context._
 
-//  var consumerId: String = ""
-//  var shardId: Int = 0
-//  var appId: String = ""
-//  var topic: String = ""
+  //  var consumerId: String = ""
+  //  var shardId: Int = 0
+  //  var appId: String = ""
+  //  var topic: String = ""
   var offset: String = ""
-//  var config: ClientConfig = _
+  //  var config: ClientConfig = _
   var count = 0
 
   var tps = 0L
@@ -48,7 +48,7 @@ trait BrokerActor extends Actor with ActorLogging {
 
     case TickFetch =>
       // Back preasure
-      if(taskQueue.length < 1000) {
+      if (taskQueue.length < 1000) {
         val messageSliceF = Messages.getMsgsF(consumer.appId, consumer.topic, offset, consumer.shardId)
         val messageSlice = Await.result(messageSliceF, 3 second)
         messageSlice.messages.foreach { (m) =>
@@ -68,7 +68,7 @@ trait BrokerActor extends Actor with ActorLogging {
 
       val now = System.currentTimeMillis()
       val sec = (now - start) / 1000
-      if(sec > 10) {
+      if (sec > 10) {
         tps = count / sec
         count = 0
         start = now
@@ -77,7 +77,7 @@ trait BrokerActor extends Actor with ActorLogging {
 
     case Tick =>
 
-      if(taskQueue.nonEmpty) {
+      if (taskQueue.nonEmpty) {
         count = count + 1
         process(taskQueue.dequeue())
       }
@@ -86,3 +86,4 @@ trait BrokerActor extends Actor with ActorLogging {
     case _ =>
 
   }
+}
