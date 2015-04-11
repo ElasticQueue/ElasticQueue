@@ -41,7 +41,7 @@ trait AdminApi extends HttpServiceActor with SprayJsonSupport {
       path("api") {
         respondWithMediaType(`application/json`) {
           complete {
-            "hello"
+            "Hello world."
           }
         }
       } ~ path("api" / "node") {

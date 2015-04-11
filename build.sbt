@@ -1,4 +1,5 @@
 import AssemblyKeys._
+import spray.revolver.RevolverPlugin._
 
 assemblySettings
 
@@ -39,6 +40,8 @@ libraryDependencies ++= Seq(
 )
 
 net.virtualvoid.sbt.graph.Plugin.graphSettings
+
+Revolver.settings
 
 //lazy val `wtb-spark` = project.settings(assemblySettings: _*)
 
