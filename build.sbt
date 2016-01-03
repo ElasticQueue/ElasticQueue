@@ -36,7 +36,8 @@ libraryDependencies ++= Seq(
   "io.spray" %% "spray-can" % "1.3.2",
   "io.spray" %% "spray-routing" % "1.3.2",
   "io.spray" %% "spray-json" % "1.3.1",
-  "io.spray" %% "spray-client" % "1.3.2"
+  "io.spray" %% "spray-client" % "1.3.2",
+  "org.scalatest" % "scalatest_2.11" % "2.0" % "test"
 )
 
 net.virtualvoid.sbt.graph.Plugin.graphSettings
