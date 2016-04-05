@@ -6,20 +6,20 @@ package mq
 
 import java.util.UUID
 import com.datastax.driver.core.utils.UUIDs
-import com.websudos.phantom.CassandraTable
-import com.websudos.phantom.Implicits._
 import java.util.Date
-import com.websudos.phantom.iteratee.Iteratee
+import com.google.common.util.concurrent.{ListenableFuture, Futures, FutureCallback}
 import org.joda.time.LocalDate
-import spray.httpx.SprayJsonSupport
 import spray.json.DefaultJsonProtocol
 import scala.concurrent.duration._
 
-import scala.concurrent.{Future => ScalaFuture, Await}
-import com.datastax.driver.core.Row
-
-import scala.util.{Failure, Success}
-import spray.json._
+import scala.concurrent.{Promise, Await, Future}
+import com.datastax.driver.core._
+import com.datastax.driver.core.querybuilder.QueryBuilder
+import scala.collection.JavaConversions._
+import org.json4s._
+import org.json4s.jackson.JsonMethods._
+import scala.concurrent.promise
+import scala.concurrent.ExecutionContext.Implicits.global
 
 case class MessageSlice(
                        start_offset: String,
@@ -92,101 +92,86 @@ case class Queue(
                 shards: Int
                   )
 
-sealed class Messages extends CassandraTable[Messages, Message] {
+object CassandraUtils {
 
-  object appId extends StringColumn(this) with PartitionKey[String]
-
-  object topic extends StringColumn(this) with PartitionKey[String]
-
-  object shardId extends IntColumn(this) with PartitionKey[Int]
-
-  object date extends DateColumn(this) with PartitionKey[Date]
-
-  object id extends TimeUUIDColumn(this) with PrimaryKey[UUID]
-
-  object payload extends StringColumn(this)
-
-  def fromRow(row: Row): Message = {
-    Message(
-      appId(row),
-      topic(row),
-      shardId(row),
-      new LocalDate(date(row)),
-      id(row),
-      payload(row)
-    )
-  }
-}
-
-sealed class Consumers extends CassandraTable[Consumers, Consumer] {
-
-  object consumerId extends StringColumn(this) with PartitionKey[String]
-
-  object shardId extends IntColumn(this) with PrimaryKey[Int]
-
-  object appId extends StringColumn(this)
-
-  object topic extends StringColumn(this)
-
-  object offset extends StringColumn(this)
-
-  object consumertype extends StringColumn(this)
-
-  object config extends JsonColumn[Consumers, Consumer, ClientConfig](this) {
-    import HttpResponseJsonProtocol._
-    override def fromJson(obj: String): ClientConfig = {
-      obj.parseJson.convertTo[ClientConfig]
-    }
-
-    override def toJson(obj: ClientConfig): String = {
-      obj.toJson.prettyPrint
+  implicit class RichListenableFuture[T](val lf: ListenableFuture[T]) extends AnyVal {
+    def toScalaFuture: Future[T] = {
+      val p = promise[T]
+      Futures.addCallback[T](lf, new FutureCallbackAdapter(p))
+      p.future
     }
   }
 
-  object status extends BooleanColumn(this)
-
-  object node extends StringColumn(this)
-
-  def fromRow(row: Row): Consumer = {
-    Consumer(
-      consumerId(row),
-      appId(row),
-      topic(row),
-      shardId(row),
-      offset(row),
-      consumertype(row),
-      config(row),
-      status(row),
-      node(row)
-    )
-  }
 }
 
-sealed class Queues extends CassandraTable[Queues, Queue] {
-
-  object appId extends StringColumn(this) with PartitionKey[String]
-
-  object topic extends StringColumn(this) with PrimaryKey[String]
-
-  object shards extends IntColumn(this)
-
-  def fromRow(row: Row): Queue = {
-    Queue(
-      appId(row),
-      topic(row),
-      shards(row)
-    )
-  }
+class FutureCallbackAdapter[V](p: Promise[V]) extends FutureCallback[V] {
+  override def onSuccess(result: V): Unit = p success result
+  override def onFailure(t: Throwable): Unit = p failure t
 }
 
-object Messages extends Messages with MyConnector {
-  override lazy val tableName = "mq"
+object Queues {
+  import CassandraUtils._
+
+  val tableName = "queue"
+  //insert into queue ( appid, topic, shards) values ('app1', 'test', 1);
+
+  def newQueue(appId: String, topic: String, shards: Int) = {
+    insertNewQueue(Queue(appId, topic, shards))
+  }
+
+  def insertNewQueue(queue: Queue) = {
+    val query = {
+      QueryBuilder
+        .insertInto(tableName)
+        .value("appId", queue.appId)
+        .value("topic", queue.topic)
+        .value("shards", queue.shards)
+    }
+    Cassandra.session.execute(query)
+  }
+
+  def getQueue(appId: String, topic: String): Future[Queue] = {
+    val query = {
+      QueryBuilder.select().all()
+        .from(tableName)
+        .where(QueryBuilder.eq("appId", appId))
+        .and(QueryBuilder.eq("topic", topic)).limit(1)
+    }
+    Cassandra.session.executeAsync(query).toScalaFuture.map(rs => queue(rs.one()))
+  }
+
+  def queue(row: Row) =
+    Queue(row.getString("appId"), row.getString("topic"), row.getInt("shards"))
+
+  def getAllQueues(): Future[List[Queue]] = {
+    val query = {
+      QueryBuilder.select().all()
+        .from(tableName)
+    }
+    Cassandra.session.executeAsync(query).toScalaFuture.map { rows =>
+      rows.map(row => queue(row)).toList
+    }
+  }
+
+  def getAllQueuesShards(): Map[String, Int] = {
+    val fetchQueues = Queues.getAllQueues()
+    val queues = Await.result(fetchQueues, 3 second)
+    queues.map(queue => queue.appId + "-" + queue.topic -> queue.shards)(collection.breakOut)
+  }
+
+}
+
+object Messages {
+
+  import CassandraUtils._
+
+  lazy val tableName = "mq"
   val r = scala.util.Random
 
   var topicShards = Queues.getAllQueuesShards()
 
   // random sharding
-  def enqueue(appId: String, topic: String, payload: String): ScalaFuture[MessageId] = {
+  def enqueue(appId: String, topic: String, payload: String): Future[MessageId] = {
     val shardId = r.nextInt(topicShards.getOrElse(appId + "-" + topic, 0))
     val message = Message(appId, topic, shardId, new LocalDate(), UUIDs.timeBased(), payload)
     Messages.insertNewRecord(message).map { r =>
@@ -195,7 +180,7 @@ object Messages extends Messages with MyConnector {
   }
 
   // consistent hash sharding
-  def enqueue(appId: String, topic: String, payload: String, hashFactor: Int): ScalaFuture[MessageId] = {
+  def enqueue(appId: String, topic: String, payload: String, hashFactor: Int): Future[MessageId] = {
     val shardId = hashFactor % topicShards.getOrElse(appId + "-" + topic, 0)
     val message = Message(appId, topic, shardId, new LocalDate(), UUIDs.timeBased(), payload)
     Messages.insertNewRecord(message).map { r =>
@@ -204,7 +189,7 @@ object Messages extends Messages with MyConnector {
   }
 
   // schedule message
-  def enqueueSchedule(appId: String, topic: String, payload: String, timestamp: Long): ScalaFuture[MessageId] = {
+  def enqueueSchedule(appId: String, topic: String, payload: String, timestamp: Long): Future[MessageId] = {
     val shardId = r.nextInt(topicShards.getOrElse(appId + "-" + topic, 0))
     val message = Message(appId, topic, shardId, new LocalDate(timestamp), UUIDs.startOf(timestamp), payload)
     Messages.insertNewRecord(message).map { r =>
@@ -213,7 +198,7 @@ object Messages extends Messages with MyConnector {
   }
 
   // delay message,
-  def enqueueDelay(appId: String, topic: String, payload: String, delay: Int): ScalaFuture[MessageId] = {
+  def enqueueDelay(appId: String, topic: String, payload: String, delay: Int): Future[MessageId] = {
     val shardId = r.nextInt(topicShards.getOrElse(appId + "-" + topic, 0))
     val targetTimestamp = new Date().getTime + delay * 1000
     val message = Message(appId, topic, shardId, new LocalDate(targetTimestamp), UUIDs.startOf(targetTimestamp), payload)
@@ -223,17 +208,22 @@ object Messages extends Messages with MyConnector {
   }
 
 
-  def insertNewRecord(message: Message): ScalaFuture[ResultSet] = {
-    insert.value(_.appId, message.appId)
-      .value(_.topic, message.topic)
-      .value(_.shardId, message.shardId)
-      .value(_.date, message.date.toDate)
-      .value(_.id, message.id)
-      .value(_.payload, message.payload)
-      .future()
+  def insertNewRecord(message: Message): Future[ResultSet] = {
+
+    val query = {
+      QueryBuilder
+        .insertInto(tableName)
+        .value("appId", message.appId)
+        .value("topic", message.topic)
+        .value("shardId", message.shardId)
+        .value("date", message.date.toDate)
+        .value("id", message.id)
+        .value("payload", message.payload)
+    }
+    Cassandra.session.executeAsync(query).toScalaFuture
   }
 
-  def getRecord(appId: String, shardId: Int, topic: String, fromId: String): ScalaFuture[Seq[Message]] = {
+  def getRecord(appId: String, shardId: Int, topic: String, fromId: String): Future[Seq[Message]] = {
 
     val uuid = UUID.fromString(fromId)
 
@@ -241,13 +231,26 @@ object Messages extends Messages with MyConnector {
 
     val uuidNow = UUIDs.timeBased()
 
-    //println(s"fetch today: $appId, $topic, $date, $uuid")
+    val query = {
+      QueryBuilder.select().all()
+        .from(tableName)
+        .where(QueryBuilder.eq("appId", appId))
+        .and(QueryBuilder.eq("topic", topic))
+        .and(QueryBuilder.eq("shardId", shardId))
+        .and(QueryBuilder.eq("date", date.toDate))
+        .and(QueryBuilder.gt("id", uuid))
+        .and(QueryBuilder.lte("id", uuidNow)).limit(100)
+    }
+    Cassandra.session.executeAsync(query).toScalaFuture.map { rows =>
+      rows.map(row => message(row)).toList
+    }
 
-    select.where(_.appId eqs appId).and(_.topic eqs topic).and(_.shardId eqs shardId).and(_.date eqs date.toDate)
-      .and(_.id gt uuid).and(_.id lte uuidNow).limit(100).fetch()
   }
 
-  def getRecordNextDay(appId: String, shardId: Int, topic: String, fromId: String): ScalaFuture[Seq[Message]] = {
+  def message(row: Row) =
+  Message(row.getString(0), row.getString(1), row.getInt(2), new LocalDate(row.getDate(3)), row.getUUID(4), row.getString(5))
+
+  def getRecordNextDay(appId: String, shardId: Int, topic: String, fromId: String): Future[Seq[Message]] = {
 
     val uuid = UUID.fromString(fromId)
 
@@ -259,18 +262,30 @@ object Messages extends Messages with MyConnector {
 
     //println(s"fetch next day: $ts, $appId, $topic, $date, $uuid")
 
-    select.where(_.appId eqs appId).and(_.topic eqs topic).and(_.shardId eqs shardId).and(_.date eqs date.toDate)
-      .and(_.id gt uuid).and(_.id lte uuidNow).limit(100).fetch()
+    val query = {
+      QueryBuilder.select().all()
+        .from(tableName)
+        .where(QueryBuilder.eq("appId", appId))
+        .and(QueryBuilder.eq("topic", topic))
+        .and(QueryBuilder.eq("shardId", shardId))
+        .and(QueryBuilder.eq("date", date.toDate))
+        .and(QueryBuilder.gt("id", uuid))
+        .and(QueryBuilder.lte("id", uuidNow)).limit(100)
+    }
+    Cassandra.session.executeAsync(query).toScalaFuture.map { rows =>
+      rows.map(row => message(row)).toList
+    }
+
   }
 
-  def getMsgsF(appId: String, topic: String, offset: String, shardId: Int): ScalaFuture[MessageSlice] = {
+  def getMsgsF(appId: String, topic: String, offset: String, shardId: Int): Future[MessageSlice] = {
     val fetchMessages = Messages.getRecord(appId, shardId, topic, offset)
     var _offset = offset
 
     fetchMessages.map { msgs =>
       if (msgs.length > 0) {
         _offset = msgs.last.id.toString
-        ScalaFuture { MessageSlice(offset, msgs, _offset) }
+        Future { MessageSlice(offset, msgs, _offset) }
       } else {
         val fetchMessagesNextDay = Messages.getRecordNextDay(appId, shardId, topic, offset)
         fetchMessagesNextDay.map { msgsNd =>
@@ -337,7 +352,7 @@ object Messages extends Messages with MyConnector {
     MessageSlice(offset, messages, _offset)
   }
 
-  def getHttpMsgs(appId: String, topic: String, offset: String, shardId: Int): ScalaFuture[HttpMessageSlice] = {
+  def getHttpMsgs(appId: String, topic: String, offset: String, shardId: Int): Future[HttpMessageSlice] = {
     val messageSliceF = getMsgsF(appId, topic, offset, shardId)
     messageSliceF.map{ messageSlice =>
 
@@ -356,80 +371,103 @@ object Messages extends Messages with MyConnector {
 
 }
 
-object Consumers extends Consumers with MyConnector {
-  override lazy val tableName = "consumer"
+object Consumers {
+
+  import CassandraUtils._
+
+  lazy val tableName = "consumer"
   //insert into consumer (consumerid, appid, offset, topic, shardId) values ('c1', 'app1', '37ebe8d1-beab-11e4-8c6b-9f4fb0fa7538', 'test', 0);
 
   def newConsumer(appId: String, consumerId: String, topic: String, consumertype: String, config: ClientConfig) = {
-    val fetchQueue = Queues.getQueue(appId, topic)
-    val queue = Await.result(fetchQueue, 3 second)
-    for (shardId <- 0 to queue.getOrElse(Queue(appId, topic, 0)).shards - 1) {
+    val queueF = Queues.getQueue(appId, topic)
+    val queue = Await.result(queueF, 3.seconds)
+
+    for (shardId <- 0 to Queue(appId, topic, 0).shards - 1) {
       //"37ebe8d1-beab-11e4-8c6b-9f4fb0fa7538"
       insertNewRecord(Consumer(consumerId, appId, topic, shardId, UUIDs.timeBased().toString, consumertype, config, false, ""))
     }
   }
 
-  def insertNewRecord(consumer: Consumer): ScalaFuture[ResultSet] = {
-    insert.value(_.consumerId, consumer.consumerId)
-      .value(_.appId, consumer.appId)
-      .value(_.topic, consumer.topic)
-      .value(_.shardId, consumer.shardId)
-      .value(_.offset, consumer.offset)
-      .value(_.consumertype, consumer.consumertype)
-      .value(_.config, consumer.config)
-      .value(_.status, consumer.status)
-      .value(_.node, consumer.node)
-      .future()
+  def insertNewRecord(consumer: Consumer): Future[ResultSet] = {
+
+    val query = {
+      QueryBuilder
+        .insertInto(tableName)
+        .value("consumerId", consumer.consumerId)
+        .value("appId", consumer.appId)
+        .value("topic", consumer.topic)
+        .value("shardId", consumer.shardId)
+        .value("offset", consumer.offset)
+        .value("consumertype", consumer.consumertype)
+        .value("config", consumer.config)
+        .value("status", consumer.status)
+        .value("node", consumer.node)
+
+    }
+    Cassandra.session.executeAsync(query).toScalaFuture
   }
 
-  def getRecord(consumerId: String, shardId: Int): ScalaFuture[Option[Consumer]] = {
-    select.where(_.consumerId eqs consumerId).and(_.shardId eqs shardId).one()
+  def consumer(row: Row) =
+  Consumer(row.getString(0), row.getString(1), row.getString(2), row.getInt(3), row.getString(4), row.getString(5),
+    parse(row.getString(6)).asInstanceOf[ClientConfig], row.getBool(7), row.getString(8)
+  )
+
+  def getRecord(consumerId: String, shardId: Int): Future[List[Consumer]] = {
+    val query = {
+      QueryBuilder.select().all()
+        .from(tableName)
+        .where(QueryBuilder.eq("consumerId", consumerId))
+        .and(QueryBuilder.eq("shardId", shardId)).limit(1)
+    }
+    Cassandra.session.executeAsync(query).toScalaFuture.map (rows =>
+      rows.map(row => consumer(row)).toList
+    )
   }
 
-  def getAllConsumers(): ScalaFuture[Seq[Consumer]] = {
-    select.fetchEnumerator() run Iteratee.collect()
+  def getAllConsumers(): Future[Seq[Consumer]] = {
+
+    val query = {
+      QueryBuilder.select().all()
+        .from(tableName)
+    }
+    Cassandra.session.executeAsync(query).toScalaFuture.map { rows =>
+      rows.map(row => consumer(row)).toList
+    }
   }
 
-  def updateOffset(consumerId: String, shardId: Int, offset: String): ScalaFuture[ResultSet] = {
-    update.where(_.consumerId eqs consumerId).and(_.shardId eqs shardId).modify(_.offset setTo offset).future()
+  def updateOffset(consumerId: String, shardId: Int, offset: String): Future[ResultSet] = {
+
+    val query = {
+      QueryBuilder.update(tableName)
+        .`with`(QueryBuilder.set("offset", offset))
+        .where(QueryBuilder.eq("consumerId", consumerId))
+      .and(QueryBuilder.eq("shardId", shardId))
+    }
+    Cassandra.session.executeAsync(query).toScalaFuture
   }
 
-  def updateStatus(consumerId: String, shardId: Int, status: Boolean, node: String): ScalaFuture[ResultSet] = {
-    update.where(_.consumerId eqs consumerId).and(_.shardId eqs shardId).modify(_.status setTo status).and(_.node setTo node).future()
+  def updateStatus(consumerId: String, shardId: Int, status: Boolean, node: String): Future[ResultSet] = {
+
+    val query = {
+      QueryBuilder.update(tableName)
+        .`with`(QueryBuilder.set("status", status))
+        .and(QueryBuilder.set("node", node))
+        .where(QueryBuilder.eq("consumerId", consumerId))
+        .and(QueryBuilder.eq("shardId", shardId))
+    }
+    Cassandra.session.executeAsync(query).toScalaFuture
   }
 
-  def getConsumersById(consumerId: String): ScalaFuture[Seq[Consumer]] = {
-    select.where(_.consumerId eqs consumerId).fetchEnumerator() run Iteratee.collect()
+  def getConsumersById(consumerId: String): Future[List[Consumer]] = {
+    val query = {
+      QueryBuilder.select("consumerId")
+        .from(tableName)
+        .where(QueryBuilder.eq("consumerId", consumerId))
+    }
+
+    Cassandra.session.executeAsync(query).toScalaFuture.map { rows =>
+      rows.map(row => consumer(row)).toList
+    }
   }
 }
 
-object Queues extends Queues with MyConnector {
-  override lazy val tableName = "queue"
-  //insert into queue ( appid, topic, shards) values ('app1', 'test', 1);
-
-  def newQueue(appId: String, topic: String, shards: Int): ScalaFuture[ResultSet] = {
-    insertNewQueue(Queue(appId, topic, shards))
-  }
-
-  def insertNewQueue(queue: Queue): ScalaFuture[ResultSet] = {
-    insert.value(_.appId, queue.appId)
-      .value(_.topic, queue.topic)
-      .value(_.shards, queue.shards)
-      .future()
-  }
-
-  def getQueue(appId: String, topic: String): ScalaFuture[Option[Queue]] = {
-    select.where(_.appId eqs appId).and(_.topic eqs topic).one()
-  }
-
-  def getAllQueues(): ScalaFuture[Seq[Queue]] = {
-    select.fetchEnumerator() run Iteratee.collect()
-  }
-
-  def getAllQueuesShards(): Map[String, Int] = {
-    val fetchQueues = Queues.getAllQueues()
-    val queues = Await.result(fetchQueues, 3 second)
-    queues.map(queue => queue.appId + "-" + queue.topic -> queue.shards)(collection.breakOut)
-  }
-
-}

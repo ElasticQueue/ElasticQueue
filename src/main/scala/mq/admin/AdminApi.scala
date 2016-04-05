@@ -91,7 +91,7 @@ trait AdminApi extends HttpServiceActor with SprayJsonSupport {
 
       }
     } ~ path("api"  / "consumer" / Segment) { consumerId =>
-      val consumer = Await.result(Consumers.getConsumersById(consumerId), 3 second)
+      val consumer = Consumers.getConsumersById(consumerId)
       complete(consumer)
     }
 

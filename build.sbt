@@ -7,9 +7,9 @@ name := "mq"
 
 version := "0.1"
 
-scalaVersion := "2.11.5"
+scalaVersion := "2.11.6"
 
-val phantomVersion = "1.5.0"
+//val phantomVersion = "1.5.0"
 val akkaVersion = "2.3.6"
 
 resolvers ++= Seq(
@@ -20,24 +20,23 @@ resolvers ++= Seq(
   "Sonatype snapshots" at "https://oss.sonatype.org/content/repositories/snapshots",
   "Sonatype staging" at "http://oss.sonatype.org/content/repositories/staging",
   "Java.net Maven2 Repository" at "http://download.java.net/maven/2/",
-  "Twitter Repository" at "http://maven.twttr.com",
-  "Websudos releases" at "http://maven.websudos.co.uk/ext-release-local"
+  "Twitter Repository" at "http://maven.twttr.com"
 )
 
 libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor" % akkaVersion,
   "com.typesafe.akka" %% "akka-remote" % akkaVersion,
   "com.typesafe.akka" %% "akka-cluster" % akkaVersion,
-  ("com.typesafe.akka" %% "akka-contrib" % akkaVersion).
-  exclude("org.iq80.leveldb", "leveldb-api"),
-  "com.websudos" %% "phantom-dsl" % phantomVersion,
-  ("com.websudos" %% "phantom-zookeeper" % phantomVersion).
-    exclude("com.twitter.common.zookeeper", "server-set"),
+  "com.typesafe.akka" %% "akka-contrib" % akkaVersion,
+  "com.datastax.cassandra" % "cassandra-driver-core" % "2.1.5",
+  "org.json4s" %% "json4s-jackson" % "3.2.10",
+  "org.json4s" %% "json4s-ext" % "3.2.10",
   "io.spray" %% "spray-can" % "1.3.2",
   "io.spray" %% "spray-routing" % "1.3.2",
   "io.spray" %% "spray-json" % "1.3.1",
   "io.spray" %% "spray-client" % "1.3.2",
-  "org.scalatest" % "scalatest_2.11" % "2.0" % "test"
+  "joda-time"  % "joda-time" % "2.4",
+  "org.scalatest" %% "scalatest" % "2.2.6" % "test"
 )
 
 net.virtualvoid.sbt.graph.Plugin.graphSettings

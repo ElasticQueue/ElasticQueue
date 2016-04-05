@@ -24,9 +24,9 @@ object ClusterApp {
     startup(args.headOption.getOrElse("0"))
   }
 
-  //sbt "run-main sample.cluster.simple.SimpleClusterApp 2551"
-  //sbt "run-main sample.cluster.simple.SimpleClusterApp 2552"
-  //sbt "run-main sample.cluster.simple.SimpleClusterApp"
+  //sbt "run-main ClusterApp 2551"
+  //sbt "run-main ClusterApp 2552"
+  //sbt "run-main ClusterApp"
 
   def startup(port: String): Unit = {
     val roles = if (seedPorts contains port) "roles = [seed,adminApi,api,consumer,producer]" else ""
@@ -84,24 +84,25 @@ object ClusterApp {
   }
 }
 
-object Init extends MyConnector {
+object Init {
 
   def start () {
     // Create tables
-    Await.ready(Queues.create.future(), 2.seconds)
-    Await.ready(Messages.create.future(), 2.seconds)
-    Await.ready(Consumers.create.future(), 2.seconds)
+    //Await.ready(Queues.create.future(), 2.seconds)
+    //Await.ready(Messages.create.future(), 2.seconds)
+    //Await.ready(Consumers.create.future(), 2.seconds)
 
     // Init queue
     Queues.newQueue("app1", "test", 3)
     Consumers.newConsumer("app1", "c1", "test", "mq.consumer.HttpClient",
       ClientConfig(endpoints = Some(List("http://localhost:4322/test/webhook")), isSecret = Some(false) ))
 
-//    Consumers.newConsumer("app1", "c1", "test", "mq.consumer.ConsolePrint",
-//      ClientConfig())
+    Consumers.newConsumer("app1", "c1", "test", "mq.consumer.ConsolePrint",
+      ClientConfig())
 
-    for (a <- 1 to 100000) {
-      val f = Messages.enqueue("app1", "test", "Hello world " + a.toString, a)
+
+    for (a <- 1 to 1000000) {
+      val f = Messages.enqueue("app1", "test", "Hello world " * 20 + a.toString, a)
       val r = Await.result(f, 2.seconds)
       //println(r)
     }
