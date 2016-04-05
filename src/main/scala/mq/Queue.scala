@@ -18,7 +18,6 @@ import com.datastax.driver.core.querybuilder.QueryBuilder
 import scala.collection.JavaConversions._
 import org.json4s._
 import org.json4s.jackson.JsonMethods._
-import scala.concurrent.promise
 import scala.concurrent.ExecutionContext.Implicits.global
 
 case class MessageSlice(
@@ -96,17 +95,17 @@ object CassandraUtils {
 
   implicit class RichListenableFuture[T](val lf: ListenableFuture[T]) extends AnyVal {
     def toScalaFuture: Future[T] = {
-      val p = promise[T]
+      val p = Promise[T]
       Futures.addCallback[T](lf, new FutureCallbackAdapter(p))
       p.future
     }
   }
 
-}
+  class FutureCallbackAdapter[V](p: Promise[V]) extends FutureCallback[V] {
+    override def onSuccess(result: V): Unit = p success result
+    override def onFailure(t: Throwable): Unit = p failure t
+  }
 
-class FutureCallbackAdapter[V](p: Promise[V]) extends FutureCallback[V] {
-  override def onSuccess(result: V): Unit = p success result
-  override def onFailure(t: Throwable): Unit = p failure t
 }
 
 object Queues {
@@ -382,7 +381,7 @@ object Consumers {
     val queueF = Queues.getQueue(appId, topic)
     val queue = Await.result(queueF, 3.seconds)
 
-    for (shardId <- 0 to Queue(appId, topic, 0).shards - 1) {
+    for (shardId <- 0 until queue.shards - 1) {
       //"37ebe8d1-beab-11e4-8c6b-9f4fb0fa7538"
       insertNewRecord(Consumer(consumerId, appId, topic, shardId, UUIDs.timeBased().toString, consumertype, config, false, ""))
     }
@@ -424,7 +423,7 @@ object Consumers {
     )
   }
 
-  def getAllConsumers(): Future[Seq[Consumer]] = {
+  def getAllConsumers: Future[Seq[Consumer]] = {
 
     val query = {
       QueryBuilder.select().all()

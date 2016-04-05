@@ -11,7 +11,7 @@ import spray.routing.HttpServiceActor
 import scala.concurrent.{Future, Await}
 import scala.concurrent.duration._
 import scala.util.Success
-import scala.concurrent.ExecutionContext.Implicits.global // for futures
+import scala.concurrent.ExecutionContext.Implicits.global
 
 
 /**
@@ -26,7 +26,7 @@ case class HttpMessage(
                         )
 
 object HttpMessageJsonProtocol extends DefaultJsonProtocol {
-  implicit val httpMessageFormat = jsonFormat4(HttpMessage)
+  implicit val httpMessageFormat = jsonFormat6(HttpMessage)
 }
 
 trait Api extends HttpServiceActor with SprayJsonSupport {

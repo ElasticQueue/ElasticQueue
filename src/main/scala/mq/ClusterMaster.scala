@@ -86,7 +86,7 @@ class ClusterMaster extends Actor with ActorLogging {
         node ! StopAll
       }
 
-      val consumers = Consumers.getAllConsumers()
+      val consumers = Consumers.getAllConsumers
       for(consumer <- consumers) {
         consumer.foreach { c =>
           Consumers.updateStatus(c.consumerId, c.shardId, status = false, "")

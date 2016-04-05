@@ -44,7 +44,7 @@ object ClusterApp {
       .withFallback(ConfigFactory.load())
 
     // Create an Akka system
-    implicit val system = ActorSystem("ClusterSystem", config)
+    implicit val system: ActorSystem = ActorSystem("ClusterSystem", config)
 
     val clusterSingletonProperties = ClusterSingletonManager.props(
       singletonProps = Props(classOf[ClusterMaster]),
@@ -104,7 +104,7 @@ object Init {
     for (a <- 1 to 1000000) {
       val f = Messages.enqueue("app1", "test", "Hello world " * 20 + a.toString, a)
       val r = Await.result(f, 2.seconds)
-      //println(r)
+      println(r)
     }
   }
 }

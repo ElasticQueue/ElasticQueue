@@ -9,7 +9,6 @@ version := "0.1"
 
 scalaVersion := "2.11.6"
 
-//val phantomVersion = "1.5.0"
 val akkaVersion = "2.3.6"
 
 resolvers ++= Seq(
@@ -19,8 +18,7 @@ resolvers ++= Seq(
   "Sonatype releases" at "https://oss.sonatype.org/content/repositories/releases",
   "Sonatype snapshots" at "https://oss.sonatype.org/content/repositories/snapshots",
   "Sonatype staging" at "http://oss.sonatype.org/content/repositories/staging",
-  "Java.net Maven2 Repository" at "http://download.java.net/maven/2/",
-  "Twitter Repository" at "http://maven.twttr.com"
+  "Java.net Maven2 Repository" at "http://download.java.net/maven/2/"
 )
 
 libraryDependencies ++= Seq(
