@@ -77,14 +77,14 @@ object ClusterApp {
       val producer = system.actorOf(Props[Producer], name = "akka-producer")
     }
 
-    if(port == "2551") Init.start()
+    if(port == "2551") InitTesting.start()
 
     sys.addShutdownHook(system.shutdown())
 
   }
 }
 
-object Init {
+object InitTesting {
 
   def start () {
     // Create tables
